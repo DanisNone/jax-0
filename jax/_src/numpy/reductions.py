@@ -398,11 +398,11 @@ def prod(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
 
 
 @partial(api.jit, static_argnames=('axis', 'keepdims'), inline=True)
-def _reduce_max(a: ArrayLike, axis: Axis = None, out: None = None,
-                keepdims: bool = False, initial: ArrayLike | None = None,
-                where: ArrayLike | None = None) -> Array:
+def _reduce_max(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
+                out: None = None, keepdims: bool = False,
+                initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
   return _reduction(a, "max", lax.max, -np.inf, has_identity=False,
-                    axis=axis, out=out, keepdims=keepdims,
+                    axis=axis, dtype=dtype, out=out, keepdims=keepdims,
                     initial=initial, where_=where, parallel_reduce=lax.pmax)
 
 
@@ -480,12 +480,12 @@ def max(a: ArrayLike, axis: Axis = None, out: None = None,
   return _reduce_max(a, axis=_ensure_optional_axes(axis), out=out,
                      keepdims=keepdims, initial=initial, where=where)
 
-@partial(api.jit, static_argnames=('axis', 'keepdims'), inline=True)
-def _reduce_min(a: ArrayLike, axis: Axis = None, out: None = None,
-                keepdims: bool = False, initial: ArrayLike | None = None,
-                where: ArrayLike | None = None) -> Array:
+@partial(api.jit, static_argnames=('axis', 'keepdims', 'dtype'), inline=True)
+def _reduce_min(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
+                out: None = None, keepdims: bool = False,
+                initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
   return _reduction(a, "min", lax.min, np.inf, has_identity=False,
-                    axis=axis, out=out, keepdims=keepdims,
+                    axis=axis, dtype=dtype, out=out, keepdims=keepdims,
                     initial=initial, where_=where, parallel_reduce=lax.pmin)
 
 
@@ -682,7 +682,11 @@ def _reduce_bitwise_and(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None
                         out: None = None, keepdims: bool = False,
                         initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
   arr = lax_internal.asarray(a)
-  init_val = np.array(-1, dtype=dtype or arr.dtype)
+  init_dtype = dtype or arr.dtype
+  if dtypes.isdtype(init_dtype, "unsigned integer"):
+    init_val = ~np.array(0, dtype=init_dtype)
+  else:
+    init_val = np.array(-1, dtype=init_dtype)
   return _reduction(arr, name="reduce_bitwise_and", op=lax.bitwise_and, init_val=init_val, preproc=_require_integer,
                     axis=_ensure_optional_axes(axis), dtype=dtype, out=out, keepdims=keepdims,
                     initial=initial, where_=where)
@@ -750,23 +754,27 @@ def _logsumexp(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
   exp_a = lax.exp(lax.sub(a_arr, amax_with_dims.astype(a_arr.dtype)))
   sumexp = exp_a.sum(axis=dims, keepdims=keepdims, where=where)
   result = lax.add(lax.log(sumexp), amax.astype(sumexp.dtype))
-  return result if initial is None else lax.logaddexp(initial, result)
+  return result if initial is None else jax.numpy.logaddexp(initial, result)
 
 
 def _logsumexp2(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
-                out: None = None, keepdims: bool = False,
-                initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
-  """Compute log2(sum(2 ** a)) via logsumexp."""
+               out: None = None, keepdims: bool = False,
+               initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
+  """Compute log2(sum(exp2(a))) while avoiding precision loss."""
   if out is not None:
     raise NotImplementedError("The 'out' argument to jnp.logaddexp2.reduce is not supported.")
   dtypes.check_user_dtype_supported(dtype, "jnp.logaddexp2.reduce")
   a = ensure_arraylike("logsumexp2", a)
   where = check_where("logsumexp2", where)
-  ln2 = float(np.log(2))
-  if initial is not None:
-    initial *= ln2
-  return _logsumexp(a * ln2, axis=axis, dtype=dtype, keepdims=keepdims,
-                    where=where, initial=initial) / ln2
+  a_arr, = promote_dtypes_inexact(a)
+  pos_dims, dims = _reduction_dims(a_arr, axis)
+  amax = max(a_arr.real, axis=dims, keepdims=keepdims, where=where, initial=-np.inf)
+  amax = lax.stop_gradient(lax.select(lax.is_finite(amax), amax, lax.full_like(amax, 0)))
+  amax_with_dims = amax if keepdims else lax.expand_dims(amax, pos_dims)
+  exp_a = lax.exp2(lax.sub(a_arr, amax_with_dims.astype(a_arr.dtype)))
+  sumexp = exp_a.sum(axis=dims, keepdims=keepdims, where=where)
+  result = lax.add(lax.mul(lax.log(sumexp), _lax_const(sumexp, 1/np.log(2))), amax.astype(sumexp.dtype))
+  return result if initial is None else jax.numpy.logaddexp2(initial, result)
 
 
 @export
