@@ -3443,9 +3443,9 @@ def clip(
       "Please convert to a real value or array by taking the real or "
       "imaginary components via jax.numpy.real/imag respectively.")
   if min is not None:
-    arr = ufuncs.maximum(min, arr)
+    arr = jax.numpy.maximum(min, arr)
   if max is not None:
-    arr = ufuncs.minimum(max, arr)
+    arr = jax.numpy.minimum(max, arr)
   return asarray(arr)
 
 

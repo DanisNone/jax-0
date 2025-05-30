@@ -261,7 +261,7 @@ class LaxNumpyUfuncTests(jtu.JaxTestCase):
 
     def jnp_fun_reduce(x, initial=None, where=None):
       return jnp_fun.reduce(x, axis=axis, initial=initial, where=where)
-    
+
     def np_fun_reduce(x, initial=None, where=None):
       if initial is not None and where is not None:
         return np_fun.reduce(x, axis=axis, initial=initial, where=where)
@@ -270,8 +270,8 @@ class LaxNumpyUfuncTests(jtu.JaxTestCase):
       if where is not None:
         return np_fun.reduce(x, axis=axis, where=where)
       return np_fun.reduce(x, axis=axis)
-    
-    
+
+
     rng = jtu.rand_default(self.rng())
     rng_initial = jtu.rand_default(self.rng())
     rng_where = jtu.rand_bool(self.rng())
@@ -282,13 +282,13 @@ class LaxNumpyUfuncTests(jtu.JaxTestCase):
         initial = rng_initial((), dtype)
       else:
         initial = None
-      
+
       if use_where:
         where = rng_where(shape, bool)
       else:
         where = None
       return [x, initial, where]
-    
+
     tol = {np.float32: 1E-4} if jtu.test_device_matches(['tpu']) else None
 
     self._CheckAgainstNumpy(jnp_fun_reduce, np_fun_reduce, args_maker, tol=tol)
