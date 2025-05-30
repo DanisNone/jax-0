@@ -682,7 +682,11 @@ def _reduce_bitwise_and(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None
                         out: None = None, keepdims: bool = False,
                         initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
   arr = lax_internal.asarray(a)
-  init_val = np.array(-1, dtype=dtype or arr.dtype)
+  init_dtype = dtype or arr.dtype
+  if dtypes.isdtype(init_dtype, "unsigned integer"):
+    init_val = ~np.array(0, dtype=init_dtype)
+  else:
+    init_val = np.array(-1, dtype=init_dtype)
   return _reduction(arr, name="reduce_bitwise_and", op=lax.bitwise_and, init_val=init_val, preproc=_require_integer,
                     axis=_ensure_optional_axes(axis), dtype=dtype, out=out, keepdims=keepdims,
                     initial=initial, where_=where)
@@ -750,7 +754,7 @@ def _logsumexp(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
   exp_a = lax.exp(lax.sub(a_arr, amax_with_dims.astype(a_arr.dtype)))
   sumexp = exp_a.sum(axis=dims, keepdims=keepdims, where=where)
   result = lax.add(lax.log(sumexp), amax.astype(sumexp.dtype))
-  return result if initial is None else lax.logaddexp(initial, result)
+  return result if initial is None else jax.numpy.logaddexp(initial, result)
 
 
 def _logsumexp2(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
