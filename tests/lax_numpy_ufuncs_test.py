@@ -56,7 +56,7 @@ def _jnp_ufunc_props(name):
   jnp_func = getattr(jnp, name)
   assert isinstance(jnp_func, jnp.ufunc)
   np_func = getattr(np, name)
-  dtypes = [np.dtype(c) for c in "Ffi?" if f"{c}{c}->{c}" in np_func.types or f"{c}->{c}" in np_func.types]
+  dtypes = [np.dtype(c) for c in "FfIi?" if f"{c}{c}->{c}" in np_func.types or f"{c}->{c}" in np_func.types]
   return [dict(name=name, dtype=dtype) for dtype in dtypes]
 
 
@@ -247,20 +247,48 @@ class LaxNumpyUfuncTests(jtu.JaxTestCase):
       [{'shape': shape, 'axis': axis}
        for shape in nonscalar_shapes
        for axis in [None, *range(-len(shape), len(shape))]],
+       [{"use_initial": False}, {"use_initial": True}],
+       [{"use_where": False}, {"use_where": True}]
   )
-  def test_binary_ufunc_reduce(self, name, shape, axis, dtype):
+  def test_binary_ufunc_reduce(self, name, shape, axis, dtype, use_initial, use_where):
     jnp_fun = getattr(jnp, name)
     np_fun = getattr(np, name)
 
     if jnp_fun.identity is None and axis is None and len(shape) > 1:
       self.skipTest("Multiple-axis reduction over non-reorderable ufunc.")
+    if jnp_fun.identity is None and use_where and not use_initial:
+      self.skipTest("'where' without 'initial' support only on ufuncs with identity")
 
-    jnp_fun_reduce = partial(jnp_fun.reduce, axis=axis)
-    np_fun_reduce = partial(np_fun.reduce, axis=axis)
-
+    def jnp_fun_reduce(x, initial=None, where=None):
+      return jnp_fun.reduce(x, axis=axis, initial=initial, where=where)
+    
+    def np_fun_reduce(x, initial=None, where=None):
+      if initial is not None and where is not None:
+        return np_fun.reduce(x, axis=axis, initial=initial, where=where)
+      if initial is not None:
+        return np_fun.reduce(x, axis=axis, initial=initial)
+      if where is not None:
+        return np_fun.reduce(x, axis=axis, where=where)
+      return np_fun.reduce(x, axis=axis)
+    
+    
     rng = jtu.rand_default(self.rng())
-    args_maker = lambda: [rng(shape, dtype)]
+    rng_initial = jtu.rand_default(self.rng())
+    rng_where = jtu.rand_bool(self.rng())
 
+    def args_maker():
+      x = rng(shape, dtype)
+      if use_initial:
+        initial = rng_initial((), dtype)
+      else:
+        initial = None
+      
+      if use_where:
+        where = rng_where(shape, bool)
+      else:
+        where = None
+      return [x, initial, where]
+    
     tol = {np.float32: 1E-4} if jtu.test_device_matches(['tpu']) else None
 
     self._CheckAgainstNumpy(jnp_fun_reduce, np_fun_reduce, args_maker, tol=tol)
@@ -299,30 +327,6 @@ class LaxNumpyUfuncTests(jtu.JaxTestCase):
     self._CheckAgainstNumpy(jnp_fun, np_fun, args_maker)
     self._CompileAndCheck(jnp_fun, args_maker)
 
-  @jtu.sample_product(
-      BINARY_UFUNCS_WITH_DTYPES,
-      [{'shape': shape, 'axis': axis}
-       for shape in nonscalar_shapes
-       for axis in [None, *range(-len(shape), len(shape))]],
-  )
-  def test_binary_ufunc_reduce_where(self, name, shape, axis, dtype):
-    jnp_fun = getattr(jnp, name)
-    np_fun = getattr(np, name)
-
-    if jnp_fun.identity is None:
-      self.skipTest("reduce with where requires identity")
-
-    jnp_fun_reduce = lambda a, where: jnp_fun.reduce(a, axis=axis, where=where)
-    np_fun_reduce = lambda a, where: np_fun.reduce(a, axis=axis, where=where)
-
-    rng = jtu.rand_default(self.rng())
-    rng_where = jtu.rand_bool(self.rng())
-    args_maker = lambda: [rng(shape, dtype), rng_where(shape, bool)]
-
-    tol = {np.float32: 1E-4} if jtu.test_device_matches(['tpu']) else None
-
-    self._CheckAgainstNumpy(jnp_fun_reduce, np_fun_reduce, args_maker, tol=tol)
-    self._CompileAndCheck(jnp_fun_reduce, args_maker)
 
   @jtu.sample_product(
       SCALAR_FUNCS,
