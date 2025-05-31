@@ -736,6 +736,27 @@ def _reduce_logical_xor(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None
                     axis=_ensure_optional_axes(axis), dtype=dtype, out=out, keepdims=keepdims,
                     initial=initial, where_=where)
 
+def _reduce_hypot(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
+               out: None = None, keepdims: bool = False,
+               initial: ArrayLike | None = None, where: ArrayLike | None = None) -> Array:
+  """Compute sqrt(sum(square(a))) while avoiding precision loss."""
+  if out is not None:
+    raise NotImplementedError("The 'out' argument to jnp.hypot.reduce is not supported.")
+  dtypes.check_user_dtype_supported(dtype, "jnp.hypot.reduce")
+
+  a = ensure_arraylike("hypot", a)
+  where = check_where("hypot", where)
+  a_arr, = promote_dtypes_inexact(a)
+  a_arr = lax.abs(a_arr)
+  pos_dims, dims = _reduction_dims(a_arr, axis)
+  amax = max(a_arr, axis=dims, keepdims=keepdims, where=where, initial=0)
+  amax = lax.stop_gradient(lax.select(lax.eq(amax, _lax_const(amax, 0)), lax.full_like(amax, 1), amax))
+  amin_with_dims = amax if keepdims else lax.expand_dims(amax, pos_dims)
+  square_a = lax.square(lax.div(a_arr, amin_with_dims.astype(a_arr.dtype)))
+  sumsquare = square_a.sum(axis=dims, keepdims=keepdims, where=where)
+  result = lax.mul(lax.sqrt(sumsquare), amax.astype(sumsquare.dtype))
+  return result if initial is None else jax.numpy.hypot(initial, result)
+
 
 def _logsumexp(a: ArrayLike, axis: Axis = None, dtype: DTypeLike | None = None,
                out: None = None, keepdims: bool = False,

@@ -3700,8 +3700,7 @@ def heaviside(x1: ArrayLike, x2: ArrayLike, /) -> Array:
                 _where(lax.gt(x1, zero), _lax_const(x1, 1), x2))
 
 
-@export
-@jit
+@binary_ufunc(identity=0, reduce=reductions._reduce_hypot)
 def hypot(x1: ArrayLike, x2: ArrayLike, /) -> Array:
   r"""
   Return element-wise hypotenuse for the given legs of a right angle triangle.
